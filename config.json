@@ -1,0 +1,41 @@
+{
+    "model" : {
+        "min_input_size":       288,
+        "max_input_size":       448,
+        "anchors_new":              [6,10, 10,59, 11,17, 15,18, 18,15, 18,21, 28,50, 29,15, 29,17],
+        "anchors":          [6,10, 10,59, 11,18, 11,16, 15,18, 18,15, 19,21, 28,50, 29,16],
+        "labels":               ["ball", "base", "bat", "out", "score1", "score2",  "session", "speed",  "strikeball", "total"]
+    },
+
+    "train": {
+        "train_image_folder":   "./train_image_12/",
+        "train_annot_folder":   "./train_annot_12/",
+        "cache_name":           "baseball.pkl",
+
+        "train_times":          8,
+        "batch_size":           2,
+        "learning_rate":        1e-4,
+        "nb_epochs":            100,
+        "warmup_epochs":        3,
+        "ignore_thresh":        0.5,
+        "gpus":                 "0,1",
+
+        "grid_scales":          [1,1,1],
+        "obj_scale":            5,
+        "noobj_scale":          1,
+        "xywh_scale":           1,
+        "class_scale":          1,
+
+        "tensorboard_dir":      "logs",
+        "saved_weights_name":   "baseball.h5",
+        "debug":                true
+    },
+
+    "valid": {
+        "valid_image_folder":   "",
+        "valid_annot_folder":   "",
+        "cache_name":           "",
+
+        "valid_times":          1
+    }
+}
