@@ -3,11 +3,10 @@ import argparse
 import json
 import cv2
 from utils.utils import get_yolo_boxes, makedirs
-from utils.bbox import draw_boxes
 from keras.models import load_model
 from tqdm import tqdm
-import numpy as np
-from utils_forrest.traj_track import filter_coord, draw_traj_points
+from utils_forrest.traj_track import get_coord, traj_track, filter_coord, draw_traj_points
+import time
 
 def _main_(args):
     config_path  = args.conf
@@ -50,7 +49,6 @@ def _main_(args):
         show_window  = False
         balls_coords = []
         balls_frms   = []
-        quiet        = True
         labels       = config['model']['labels']
         for i in tqdm(range(nb_frames)):
             _, image = video_reader.read()
@@ -66,55 +64,21 @@ def _main_(args):
                     batch_boxes = get_yolo_boxes(infer_model, images, net_h, net_w, config['model']['anchors'], obj_thresh, nms_thresh)
 
                     for k in range(len(images)):
-                        # trajectory track
-                        # discarded: traj_track(images[i], batch_boxes[i], config['model']['labels'], obj_thresh)
-                        for box in batch_boxes[k]:
-                            label_str = ''
-                            label = -1
+                        # stack all ball coords
+                        coords = get_coord(images[k], batch_boxes[k], labels, obj_thresh, i) # i: frame no
+                        balls_coords = balls_coords + coords
 
-                            for j in range(len(labels)):
-                                if box.classes[j] > obj_thresh:
-                                    if label_str != '': label_str += ', '
-                                    label_str += (labels[j] + ' ' + str(round(box.get_score() * 100, 2)) + '%')
-                                    label = j
-                                if not quiet: print(label_str)
-
-                            if label >= 0 and labels[label] == "ball":
-                                # stack all ball coords
-                                balls_coords.append(( int((box.xmin + box.xmax) / 2), int((box.ymin + box.ymax) / 2), i )) # i: frameNo
-                        # Further: draw bounding boxes on the image using labels
-                        # show the video with detection bounding boxes          
+                        # show the video after above operations
                         if show_window: cv2.imshow('video with bboxes', images[k])
 
                     images = []
                 if show_window and cv2.waitKey(1) == 27: break  # esc to quit
 
-        # filter wrong ball coord
-        balls_coords = filter_coord(balls_coords)
-        print("FROM{}TO".format(balls_coords)) # TEST
-
-        # generate trajectory video
-        video_writer = cv2.VideoWriter(video_out,
-                                       cv2.VideoWriter_fourcc(*'MPEG'),
-                                       video_fps,
-                                       (frame_w, frame_h))
-        for i in range(len(balls_frms)):
-            coord_stack = []
-            for coord in balls_coords:
-                if coord[2] <= i: coord_stack.append(coord)
-            if len(coord_stack) > 0: draw_traj_points(coord_stack, balls_frms[i])
-            video_writer.write(balls_frms[i])
-
-        # generate trajectory image
-        print("firstBallNo:{}, \nlastBallNo:{}, \nlengthOfFrm:{}".format(balls_coords[0][2], balls_coords[-1][2], len(balls_frms))) # test
-        first_ball_no = balls_coords[0][2]
-        first_ball_frm = balls_frms[first_ball_no]
-        output_image = draw_traj_points(balls_coords, first_ball_frm)
-        cv2.imwrite(video_out[:-3] + "jpg", output_image)
+        # track trajectory
+        traj_track(balls_coords, balls_frms, video_out, video_fps, frame_w, frame_h)
 
         if show_window: cv2.destroyAllWindows()
         video_reader.release()
-        video_writer.release()       
     else:
         print("Trajectory tracking can only be done on videos. ")
 
@@ -125,4 +89,7 @@ if __name__ == '__main__':
     argparser.add_argument('-o', '--output', default='output/', help='path to output directory')   
     
     args = argparser.parse_args()
+
+    start = time.time()
     _main_(args)
+    print('It took', time.time()-start, 'seconds.')
