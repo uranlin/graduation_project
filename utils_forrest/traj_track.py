@@ -122,7 +122,8 @@ def filter_coord(coords, frame_w, quiet=True):
     df_scaled = scaler.fit_transform(df)
     df_normalized = normalize(df_scaled) # numpy Array of an approximately Gaussian distribution
     df_normalized = pd.DataFrame(df_normalized)
-    df_normalized.iloc[:, 2] = df_normalized.iloc[:, 2] * 12
+    df_normalized.iloc[:, 2] = df_normalized.iloc[:, 2] * 10 # callibrate weight: frame_no
+    df_normalized.iloc[:, 1] = df_normalized.iloc[:, 1] * 1.5 # callibrate weight: y_axis
     db_default = DBSCAN(eps = 0.35, min_samples = 2).fit(df_normalized)
     labels = db_default.labels_
 
@@ -186,14 +187,6 @@ def draw_traj_points(coords, image, cluster):
                    color = get_color(coord[3]), # (0, 0, 255), 
                    thickness = -1)
         cv2.putText(img = image,
-                    text = str(coord[3]),
-                    org = (coord[0], coord[1]+15),
-                    fontFace = cv2.FONT_HERSHEY_SIMPLEX,
-                    fontScale = 8e-4 * image.shape[0],
-                    color = get_color(coord[3]), # (216, 255,  1),
-                    thickness = 1,
-                    lineType = cv2.LINE_AA)
-        cv2.putText(img = image,
                     text = "FrameNo. {}".format(coord[2]),
                     org = (5, 20),
                     fontFace = cv2.FONT_HERSHEY_SIMPLEX,
@@ -220,13 +213,5 @@ def draw_traj_points(coords, image, cluster):
                        radius = radius, 
                        color = get_color(coord[3]), # (0, 0, 255), 
                        thickness = -1)
-            cv2.putText(img = image,
-                        text = str(coord[3]),
-                        org = (coord[0], coord[1]+15),
-                        fontFace = cv2.FONT_HERSHEY_SIMPLEX,
-                        fontScale = 8e-4 * image.shape[0],
-                        color = get_color(coord[3]), # (216, 255,  1),
-                        thickness = 1,
-                        lineType = cv2.LINE_AA)
 
     return image
