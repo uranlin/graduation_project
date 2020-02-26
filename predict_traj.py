@@ -92,4 +92,4 @@ if __name__ == '__main__':
 
     start = time.time()
     _main_(args)
-    print('It took', time.time()-start, 'seconds.')
+    print('\n>> Total consuming time: ', time.time()-start, 'seconds.')

@@ -61,11 +61,10 @@ def traj_track(balls_coords, balls_frms, video_out, video_fps, frame_w, frame_h,
     Output:
     # save the trajectory video & image to disk
     '''
-    columns = ['cluster', 'x_coords', 'y_coords', 'frame_no', 'cluster_cnt']
 
     # filter ball coord on trajectory
-    df_coords, cluster = filter_coord(balls_coords, frame_w) # columns: cluster, x_coords, y_coords, frame_no, cluster_cnt
-    if not quiet: print("All ball coords: \n{}".format(df_coords))
+    balls_coords, cluster = filter_coord(balls_coords, frame_w)
+    if not quiet: print("All ball coords: \n{}".format(balls_coords))
 
     # generate trajectory video
     video_writer = cv2.VideoWriter(video_out,
@@ -73,17 +72,17 @@ def traj_track(balls_coords, balls_frms, video_out, video_fps, frame_w, frame_h,
                                    video_fps,
                                    (frame_w, frame_h))
     for i in range(len(balls_frms)):
-        coord_stack = pd.DataFrame(columns=columns)
-        for index, coord in df_coords.iterrows():
-            if coord['frame_no'] <= i: coord_stack = coord_stack.append(coord)
-        if coord_stack.shape[0] > 0: draw_traj_points(coord_stack.values.tolist(), balls_frms[i], cluster)
+        coord_stack = []
+        for coord in balls_coords:
+            if coord[2] <= i: coord_stack.append(coord)
+        if len(coord_stack) > 0: draw_traj_points(coord_stack, balls_frms[i], cluster)
         video_writer.write(balls_frms[i])
 
     # generate trajectory image
-    if not quiet: print("firstBallNo:{}, \nlastBallNo:{}, \nlengthOfFrm:{}".format(df_coords.iloc[0, 3], df_coords.iloc[-1, 3], len(balls_frms)))
-    first_ball_no = df_coords.iloc[0, 3]
+    if not quiet: print("firstBallNo:{}, \nlastBallNo:{}, \nlengthOfFrm:{}".format(balls_coords[0][2], balls_coords[-1][2], len(balls_frms)))
+    first_ball_no = balls_coords[0][2]
     first_ball_frm = balls_frms[first_ball_no]
-    output_image = draw_traj_points(df_coords.values.tolist(), first_ball_frm, cluster)
+    output_image = draw_traj_points(balls_coords, first_ball_frm, cluster)
     cv2.imwrite(video_out[:-3] + "jpg", output_image)
 
     video_writer.release()
@@ -96,10 +95,10 @@ def filter_coord(coords, frame_w, quiet=True):
     # Epsilon value best performance around: 0.3 - 0.4
 
     Input accept:
-    # coords: multiple coordinates in a list, each one in tuple type including (x_coord, y_coord, frame_no)
+    # coords: multiple coordinates in a list, each one in tuple type including x_coord, y_coord, frame_no
 
     Output:
-    # df_coords: multiple coordinates in a dataframe, columns: cluster(-1 := discarded), x_coord, y_coord, frame_no, cluster_cnt
+    # multiple coordinates in a list, each one in tuple type including x_coord, y_coord, frame_no, cluster(-1 := discarded)
 
     Testing data:
     # coords = [
@@ -115,44 +114,40 @@ def filter_coord(coords, frame_w, quiet=True):
     min_no = 4 # min of frames to be identified as trajectory
     bound_l, bound_r = 45, 65 # %
     bound_l, bound_r = bound_l/100 * frame_w, bound_r/100 * frame_w
-    columns = ['cluster', 'x_coords', 'y_coords', 'frame_no', 'cluster_cnt']
-    valid_coords = pd.DataFrame(columns=columns)
+    valid_coords = []
 
     # Clustering coords data by DBSCAN
-    df_coords = pd.DataFrame(coords, columns=["x_coords", "y_coords", "frame_no"])
+    df = pd.DataFrame(coords, columns=["x_coords", "y_coords", "frame_no"])
     scaler = StandardScaler()
-    df_scaled = scaler.fit_transform(df_coords)
+    df_scaled = scaler.fit_transform(df)
     df_normalized = normalize(df_scaled) # numpy Array of an approximately Gaussian distribution
     df_normalized = pd.DataFrame(df_normalized)
+    df_normalized.iloc[:, 2] = df_normalized.iloc[:, 2] * 12
     db_default = DBSCAN(eps = 0.35, min_samples = 2).fit(df_normalized)
     labels = db_default.labels_
-    labels = pd.Series(labels, name='cluster')
-    df_coords = df_coords.join(labels, how='left') # columns: x_coords, y_coords, frame_no, cluster
-    if not quiet: print('df_coords::\n{}'.format(df_coords))
 
-    # Find number of records in a cluster
-    cluster_cnt = df_coords.groupby(['cluster']).size().to_frame(name='cluster_cnt')
-    df_coords = df_coords.set_index(['cluster']).join(cluster_cnt, how='left')
-    df_coords = df_coords.reset_index() # columns: cluster, x_coords, y_coords, frame_no, cluster_cnt
-    if not quiet: print('reset index::\n{}'.format(df_coords))
+    # Count number of points per cluster
+    labels_cnt = pd.DataFrame(labels, columns=['cluster']).groupby('cluster').size()
+    
+    # Paste cluster label back to coordinate
+    for i in range(len(coords)):
+        coords[i] = coords[i] + (labels[i], )
 
     # Find trajectory cluster
-    for i in range(1, df_coords.shape[0]):
-        if df_coords.loc[i, 'x_coords'] >= bound_l and \
-           df_coords.loc[i, 'x_coords'] <= bound_r and \
-           df_coords.loc[i, 'cluster_cnt'] > min_no and \
-           df_coords.loc[i, 'x_coords'] > df_coords.loc[i-1, 'x_coords']:
-           valid_coords = valid_coords.append(df_coords.iloc[i]) # cluster, x_coords, y_coords, frame_no, cluster_cnt
-    valid_coords = valid_coords.sort_values(['frame_no']).reset_index()
-#    valid_coords.sort(key=lambda e: e[3]) # take forth
-    if valid_coords.shape[0] > 0:
-        cluster = valid_coords.loc[0, 'cluster']
-
+    for i in range(1, len(coords)):
+        if coords[i][0] >= bound_l and \
+           coords[i][0] <= bound_r and \
+           labels_cnt.loc[coords[i][3]] >= min_no and \
+           coords[i][0] > coords[i-1][1] and \
+           (coords[i][3] != -1):
+            valid_coords.append(coords[i])
+    valid_coords.sort(key=lambda e: e[2]) # take third
+    cluster = valid_coords[0][3]
     if not quiet:
-        print('valid_coords::\n'.format(valid_coords))
-        print('bound_l: {}\nbound_r:{} \ncluster:{}'.format(bound_l, bound_r, cluster))
+        print(valid_coords)
+        print("bound_l: {}\nbound_r:{} \ncluster:{}".format(bound_l, bound_r, cluster))
 
-    return df_coords, cluster
+    return coords, cluster
 
 
 def draw_traj_points(coords, image, cluster):
@@ -162,7 +157,7 @@ def draw_traj_points(coords, image, cluster):
     # Number of coordinates unlimited
 
     Input accept:
-    # coords: single & multiple coordinates, in a list [cluster, x_coords, y_coords, frame_no, cluster_cnt]
+    # coords: single & multiple coordinates, each coordinate in tuple type
     # image: single image
 
     Ouput:
@@ -174,48 +169,64 @@ def draw_traj_points(coords, image, cluster):
     #                   [box.xmin - 3,          box.ymax + height + 26],
     #                   [box.xmin + width + 13, box.ymax + height + 26],
     #                   [box.xmin + width + 13, box.ymax]], dtype = 'int32')
-    if len(coords) == 1 or (len(coords) == 3 and len(coords[0]) == 1):
+    if(isinstance(coords, (tuple)) or len(coords) == 1):
         if(len(coords) == 1):
             coord = coords[0]
         else:
             coord = coords
 
-        if coord[0] == cluster:
+        if coord[3] == cluster:
             radius = 4
         else:
             radius = 2
 
         cv2.circle(img = image, 
-                   center = tuple(coord[1:3]), 
+                   center = coord[:2], 
                    radius = radius, 
-                   color = get_color(coord[0]), # (0, 0, 255), 
+                   color = get_color(coord[3]), # (0, 0, 255), 
                    thickness = -1)
         cv2.putText(img = image,
-                    text = "FrameNo. {}".format(coord[3]),
+                    text = str(coord[3]),
+                    org = (coord[0], coord[1]+15),
+                    fontFace = cv2.FONT_HERSHEY_SIMPLEX,
+                    fontScale = 8e-4 * image.shape[0],
+                    color = get_color(coord[3]), # (216, 255,  1),
+                    thickness = 1,
+                    lineType = cv2.LINE_AA)
+        cv2.putText(img = image,
+                    text = "FrameNo. {}".format(coord[2]),
                     org = (5, 20),
                     fontFace = cv2.FONT_HERSHEY_SIMPLEX,
                     fontScale = 8e-4 * image.shape[0],
-                    color = get_color(coord[0]), # (216, 255,  1),
+                    color = get_color(coord[3]), # (216, 255,  1),
                     thickness = 1,
                     lineType = cv2.LINE_AA)
     else:
         cv2.putText(img = image,
-                    text = "FrameNo. {} 0.3500".format(coords[-1][3]),
+                    text = "FrameNo. {} 0.3500".format(coords[-1][2]),
                     org = (5, 20),
                     fontFace = cv2.FONT_HERSHEY_SIMPLEX,
                     fontScale = 8e-4 * image.shape[0],
-                    color = get_color(coords[-1][0]), # (216, 255,  1),
+                    color = get_color(coords[-1][3]), # (216, 255,  1),
                     thickness = 1,
                     lineType = cv2.LINE_AA)
         for coord in coords:
-            if coord[0] == cluster:
+            if coord[3] == cluster:
                 radius = 4
             else:
                 radius = 2
             cv2.circle(img = image, 
-                       center = tuple(coord[1:3]), 
+                       center = coord[:2], 
                        radius = radius, 
-                       color = get_color(coord[0]), # (0, 0, 255), 
+                       color = get_color(coord[3]), # (0, 0, 255), 
                        thickness = -1)
+            cv2.putText(img = image,
+                        text = str(coord[3]),
+                        org = (coord[0], coord[1]+15),
+                        fontFace = cv2.FONT_HERSHEY_SIMPLEX,
+                        fontScale = 8e-4 * image.shape[0],
+                        color = get_color(coord[3]), # (216, 255,  1),
+                        thickness = 1,
+                        lineType = cv2.LINE_AA)
 
     return image
