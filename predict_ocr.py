@@ -1,3 +1,8 @@
+'''
+Optimization idea:
+# stack frames & move functions to utils_forrest.ocr_detect.py
+# open multiple thread to process ocr operations
+'''
 import os
 import argparse
 import json
@@ -7,7 +12,11 @@ from utils.bbox import draw_boxes
 from keras.models import load_model
 from tqdm import tqdm
 import numpy as np
-from utils_forrest.ocr_detect import draw_ocr_boxes, tmp_draw_ocr_text, detect_text
+import pandas as pd
+import pytesseract
+import textwrap
+import time
+from utils_forrest.ocr_detect import draw_ocr_boxes, draw_ocr_text, detect_text
 
 def _main_(args):
     config_path  = args.conf
@@ -35,8 +44,9 @@ def _main_(args):
     #   Predict bounding boxes 
     ###############################
     if input_path[-4:] in ['.avi', '.mp4']: # do detection on a video  
-        video_out = output_path + '/pred_'  + input_path.split('/')[-1]
+        video_out = output_path + '/ocr_'  + input_path.split('/')[-1]
         video_reader = cv2.VideoCapture(input_path)
+        csv_out = output_path + '/ocrcsv_' + input_path.split('/')[-1][:-3] + 'csv'
 
         video_fps = int(video_reader.get(cv2.CAP_PROP_FPS))
         nb_frames = int(video_reader.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -52,6 +62,12 @@ def _main_(args):
         images      = []
         start_point = 0 #%
         show_window = False
+        quiet       = True
+        detect_text = {}
+        labels      = config['model']['labels']
+        # 主隊, 客隊, 局數, 好壞球, 投球數, 總球數, 球速
+        ocr_labels = ['score1', 'score2', 'session', 'strikeball', 'total', 'speed']
+        ocr_result = pd.DataFrame(columns = ocr_labels)
         for i in tqdm(range(nb_frames)):
             _, image = video_reader.read()
 
@@ -64,18 +80,50 @@ def _main_(args):
 
                     for i in range(len(images)):
                         # detect text
-                        detect_text(images[i], batch_boxes[i], config['model']['labels'], obj_thresh)
+                        # return a list of ocr results
+                        # depracated call: images[i], ocr_rec = detect_text(images[i], batch_boxes[i], ocr_labels, config['model']['labels'], obj_thresh)
+                        for box in batch_boxes[i]:
+                            label_str = ''
+                            label_id = -1
 
-                        # draw bounding boxes on the image using labels
-                        draw_boxes(images[i], batch_boxes[i], config['model']['labels'], obj_thresh)   
+                            # filter label(s) that is recognized for this box
+                            for j in range(len(labels)):
+                                if box.classes[j] > obj_thresh:
+                                    if label_str != '': label_str += ', '
+                                    label_str += (labels[j] + ' ' + str(round(box.get_score()*100, 2)) + '%')
+                                    label_id = j
+                                if not quiet: print(label_str)
+
+                            # detect text from current box
+                            if label_id >= 0 and labels[label_id] in ocr_labels:
+                                # do detection
+                                cropped = images[i][box.ymin:box.ymax, box.xmin:box.xmax]
+                                detect_item = pytesseract.image_to_string(cropped) # cropped image
+                                if detect_item == "":
+                                    detect_text.update({labels[label_id]: "N/A"})
+                                else:
+                                    detect_text.update({labels[label_id]: detect_item})
+
+                        # draw box with detected text
+                        draw_ocr_text(detect_text, ocr_labels, images[i])
+                        draw_boxes(images[i], batch_boxes[i], config['model']['labels'], obj_thresh)
+
+                        # write records into dataframe
+                        ocr_result = ocr_result.append(detect_text, ignore_index = True)
+                        detect_text = {}
 
                         # show the video with detection bounding boxes          
                         if show_window: cv2.imshow('video with bboxes', images[i])  
 
                         # write result to the output video
                         video_writer.write(images[i]) 
+
                     images = []
+
                 if show_window and cv2.waitKey(1) == 27: break  # esc to quit
+
+        print(ocr_result) # TEST output
+        ocr_result.to_csv(csv_out)
 
         if show_window: cv2.destroyAllWindows()
         video_reader.release()
@@ -114,4 +162,7 @@ if __name__ == '__main__':
     argparser.add_argument('-o', '--output', default='output/', help='path to output directory')   
     
     args = argparser.parse_args()
+    start = time.time()
     _main_(args)
+    print('\n>> Total consuming time: ', time.time()-start, 'seconds.')
+

@@ -75,7 +75,7 @@ def _main_(args):
                 if show_window and cv2.waitKey(1) == 27: break  # esc to quit
 
         # track trajectory
-        traj_track(balls_coords, balls_frms, video_out, video_fps, frame_w, frame_h)
+        traj_track(balls_coords, balls_frms, video_out, video_fps, frame_w, frame_h, quiet=False)
 
         if show_window: cv2.destroyAllWindows()
         video_reader.release()
